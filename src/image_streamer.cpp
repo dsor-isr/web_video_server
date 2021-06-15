@@ -1,6 +1,7 @@
 #include "web_video_server/image_streamer.h"
 #include <cv_bridge/cv_bridge.h>
 #include <iostream>
+#include <ctime>
 
 namespace web_video_server
 {
@@ -24,6 +25,9 @@ ImageTransportImageStreamer::ImageTransportImageStreamer(const async_web_server_
   output_height_ = request.get_query_param_value_or_default<int>("height", -1);
   invert_ = request.has_query_param("invert");
   default_transport_ = request.get_query_param_value_or_default("default_transport", "raw");
+  timestamp_ = request.has_query_param("timestamp");
+  skip_n_ = request.get_query_param_value_or_default<int>("skip", 0);
+  n_frame_ = 0;
 }
 
 ImageTransportImageStreamer::~ImageTransportImageStreamer()
@@ -81,10 +85,31 @@ void ImageTransportImageStreamer::restreamFrame(double max_age)
   }
 }
 
+std::string stampToString(const ros::Time& stamp, const std::string format="%H:%M:%S")
+{
+  const int output_size = 100;
+  char output[output_size];
+  std::time_t raw_time = static_cast<time_t>(stamp.sec);
+  struct tm* timeinfo = localtime(&raw_time);
+  std::strftime(output, output_size, format.c_str(), timeinfo);
+  std::stringstream ss;
+  ss << std::setw(9) << std::setfill('0') << stamp.nsec;
+  const size_t fractional_second_digits = 1;
+  return std::string(output) + "." + ss.str().substr(0, fractional_second_digits);
+}
+
 void ImageTransportImageStreamer::imageCallback(const sensor_msgs::ImageConstPtr &msg)
 {
   if (inactive_)
     return;
+
+  n_frame_++;
+
+  // Skip every n frames (for bandwidth control)
+  if (n_frame_ % (skip_n_+1))
+  {
+    return;
+  }
 
   cv::Mat img;
   try
@@ -143,7 +168,21 @@ void ImageTransportImageStreamer::imageCallback(const sensor_msgs::ImageConstPtr
     }
 
     last_frame = ros::Time::now();
+
+    if (timestamp_)
+    {
+      cv::putText(output_size_image, //target image
+              stampToString(last_frame).c_str(), //text
+              cv::Point(10, 40), //top-left position
+              cv::FONT_HERSHEY_DUPLEX,
+              1.0,  // font scale
+              CV_RGB(0, 255, 0), //font color
+              1,  // thickness
+              cv::LINE_AA);
+    }
+
     sendImage(output_size_image, msg->header.stamp);
+
   }
   catch (cv_bridge::Exception &e)
   {

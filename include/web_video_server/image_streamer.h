@@ -64,6 +64,9 @@ protected:
   int output_height_;
   bool invert_;
   std::string default_transport_;
+  bool timestamp_;
+  int skip_n_;
+  int n_frame_;
 
   ros::Time last_frame;
   cv::Mat output_size_image;
